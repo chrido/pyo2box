@@ -6,13 +6,11 @@ Tested with Python 3.
 
 
 **get_wireless_devices**<br>
-Returns a list of namedtuples with the currently connected devices. The entries contain the link_rate, mac and signal.
-
-
+Returns a list of namedtuples with the currently connected devices. The entries contain the link_rate, mac ip, signal and when available, the hostname.
 Dependencies
 ------------
 
-Usage
+U
 ```python
 o2box = O2Box('192.168.1.1', 'yourpassword')
 
