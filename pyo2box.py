@@ -74,11 +74,10 @@ class O2Box(object):
 
         return dict((m, rest) for m, rest in extract_dhcp_clients())
 
-
-    def get_wireless_devices(self):
+    def _login(self, session):
         """
-        Returns a list of wireless devices connected to the router
-
+        Login with current session
+        Returns True when sucessful, False when unsuccessful
         """
         payload = {
             'controller': 'Overview',
@@ -86,16 +85,49 @@ class O2Box(object):
             'id': '0',
             'idTextPassword': self.password
         }
+        res = session.post(self.baseurl + '/cgi-bin/Hn_login.cgi', data=payload)
+        lines = res.text.split('\n')
+        for line in lines:
+            if 'msgLoginPwd_err' in line:
+                return False
+
+        return True
+
+    def _logout(self, session):
+        """
+        Always immediatly log out again, otherwise access to router would be blocked
+        """
+        session.get(self.baseurl + '/cgi-bin/Hn_logout.cgi')
+
+    def try_login(self):
+        """
+        Tries to login and then logout
+        Returns true if attemp was successful, false when unsuccessful
+        """
+        try:
+            with requests.Session() as s:
+                return self._login(s)
+        except:
+            LOGGER.exception('error occured while getting wlan devices from router')
+            return False
+
+
+    def get_wireless_devices(self):
+        """
+        Returns a list of wireless devices connected to the router
+
+        """
 
         try:
             with requests.Session() as s:
-                p = s.post(self.baseurl + '/cgi-bin/Hn_login.cgi', data=payload)
+                self._login(s)
                 LOGGER.debug("logged in")
+
                 lanoverview = s.get(self.baseurl + '/lan_overview.htm')
                 LOGGER.debug("fetched lan overview")
 
                 # log immediately out, access is blocked if not
-                s.get(self.baseurl + '/cgi-bin/Hn_logout.cgi')
+                self._logout(s)
                 LOGGER.debug("logged out")
 
                 def extract_wireless_information():
