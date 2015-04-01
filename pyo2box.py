@@ -7,14 +7,73 @@ import requests
 import logging
 from collections import namedtuple
 
-wlandevice = namedtuple('WlanDevice', ['mac', 'signal', 'link_rate'])
+wlandevice = namedtuple('WlanDevice', ['mac', 'name', 'ip', 'signal', 'link_rate'])
 
 LOGGER = logging.getLogger(__name__)
+
 
 class O2Box(object):
     def __init__(self, host, password):
         self.baseurl = "http://{}".format(host)
         self.password = password
+
+    def _pretty_mac(self, macugly):
+        macs = macugly.replace('[', '').replace(']', '').replace('\'', '').split(',')
+        return ':'.join(macs)
+
+
+    def _extract_wireless_info(self, lines):
+        """
+        Extracts the info of all the wireless devices from the Javascript section of the HTML
+        """
+        clientlines = list(filter(lambda l: 'STA_infos[' in l and 'lan_client_t' not in l, lines))
+        client_cnt = int(len(clientlines) / 4)
+
+        def extract_client_infos():
+            for i in range(0, client_cnt):
+                cclines = map(lambda cc: cc.split('.')[1], (filter(lambda l: '[%i]' % i in l, clientlines)))
+                cleaned = list(map(lambda cc: cc.replace(';', '').split('='), cclines))
+                mac = signal = link_rate = None
+                for key, val in cleaned:
+                    if key == 'mac':
+                        mac = self._pretty_mac(val)
+                    if key == 'RSSI':
+                        signal = int(val)
+                    if key == 'rate':
+                        link_rate = int(val)
+
+                if mac is not None:
+                    yield (mac, (signal, link_rate))
+
+        return dict((m, rest) for m, rest in extract_client_infos())
+
+    def _extract_dhcp_clients(self, lines):
+        """
+        Extracts all DHCP clients from the Javascript section of the HTML
+        """
+        clientlines = list(filter(lambda l: 'dhcpclients[' in l and '].' in l, lines))
+        dhcp_cnt = int(len(clientlines) / 4)
+
+        def extract_dhcp_clients():
+            for i in range(0, dhcp_cnt):
+                cclines = map(lambda cc: cc.split('.')[1], (filter(lambda l: '[%i]' % i in l, clientlines)))
+                cleaned = list(map(lambda cc: cc.replace(';', '').replace(' ', '').replace('\'', '').split('='), cclines))
+                ma = name = ip = None
+                for key, val in cleaned:
+                    if key == 'name':
+                        if val != '':
+                            name = val
+                    if key == 'mac':
+                        ma = self._pretty_mac(val)
+                    if key == 'ip':
+                        ipparts = val.replace('[', '').replace(']', '').replace(' ', '').split(',')
+                        ip = '.'.join(ipparts)
+
+                toyield = (ma, (name, ip))
+                yield toyield
+
+        return dict((m, rest) for m, rest in extract_dhcp_clients())
+
 
     def get_wireless_devices(self):
         """
@@ -31,36 +90,32 @@ class O2Box(object):
         try:
             with requests.Session() as s:
                 p = s.post(self.baseurl + '/cgi-bin/Hn_login.cgi', data=payload)
+                LOGGER.debug("logged in")
                 lanoverview = s.get(self.baseurl + '/lan_overview.htm')
+                LOGGER.debug("fetched lan overview")
 
-                #log immediately out, access is blocked if not
+                # log immediately out, access is blocked if not
                 s.get(self.baseurl + '/cgi-bin/Hn_logout.cgi')
+                LOGGER.debug("logged out")
 
-                lines = lanoverview.text.split('\n')
+                def extract_wireless_information():
+                    lines = lanoverview.text.split('\n')
 
-                clientlines = list(filter(lambda l: 'STA_infos[' in l and 'lan_client_t' not in l, lines))
-                client_cnt = int(len(clientlines)/4)
+                    dhcpClients = self._extract_dhcp_clients(lines)
 
-                def extract_client_infos():
-                    for i in range(0, client_cnt):
-                        cclines = map(lambda cc: cc.split('.')[1], (filter(lambda l: '[%i]' %i in l, clientlines)))
-                        cleaned = list(map(lambda cc: cc.replace(';','').split('='), cclines))
-                        properties = dict()
-                        for key, val in cleaned:
-                            if key =='mac':
-                                macs = val.replace('[', '').replace(']', '').replace('\'', '').split(',')
-                                mac = ':'.join(macs)
-                            if key == 'RSSI':
-                                signal = int(val)
-                            if key == 'rate':
-                                link_rate = int(val)
+                    for k, infos in self._extract_wireless_info(lines).items():
+                        if k in dhcpClients:
+                            name, ip = dhcpClients[k]
+                        else:
+                            name = ip = None
 
-                        yield wlandevice(mac, signal, link_rate)
+                        yield wlandevice(k, name, ip, infos[0], infos[1])
 
-                return list(extract_client_infos())
+                return list(extract_wireless_information())
         except:
             LOGGER.exception('error occured while getting wlan devices from router')
             return None
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
