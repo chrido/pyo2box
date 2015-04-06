@@ -120,7 +120,10 @@ class O2Box(object):
 
         try:
             with requests.Session() as s:
-                self._login(s)
+                if not self._login(s):
+                    LOGGER.error("login failed")
+                    return None
+
                 LOGGER.debug("logged in")
 
                 lanoverview = s.get(self.baseurl + '/lan_overview.htm')
@@ -144,6 +147,7 @@ class O2Box(object):
                         yield wlandevice(k, name, ip, infos[0], infos[1])
 
                 return list(extract_wireless_information())
+
         except:
             LOGGER.exception('error occured while getting wlan devices from router')
             return None
