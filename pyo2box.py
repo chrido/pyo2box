@@ -112,7 +112,7 @@ class O2Box(object):
                 else:
                     return False
         except:
-            LOGGER.exception('error occured while getting wlan devices from router')
+            LOGGER.exception('error occured while logging in')
             return False
 
 
