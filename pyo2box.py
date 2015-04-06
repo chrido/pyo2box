@@ -106,7 +106,11 @@ class O2Box(object):
         """
         try:
             with requests.Session() as s:
-                return self._login(s)
+                if self._login(s):
+                    self._logout(s)
+                    return True
+                else:
+                    return False
         except:
             LOGGER.exception('error occured while getting wlan devices from router')
             return False
